@@ -1,0 +1,8 @@
+{
+  "files.associations": {
+    "*.templ": "templ",
+    "*.proto": "proto3",
+    "*.conf": "properties",
+    "ios": "cpp"
+  }
+}

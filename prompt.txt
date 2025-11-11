@@ -1,0 +1,38 @@
+Act as a senior IoT developer experienced in developing Arduino and similar devices.
+
+I want to write a program for an M5Cardputer.
+
+Cardputer spec
+- M5Stack Card Computer (cardputer)
+- v1.1
+- Stamp S3A
+
+The new program is a clock with the following features:
+- display HH:mm:ss
+- connect to WiFi - select SID and enter password
+- call NTP server every m minutes to set exact time
+- ability to manually set time
+- ability to set one alarm
+- the alarm shuts off automaticall after s seconds
+- while plugged in to a charger, the clock will stay on
+
+Code Quality
+- Decouple functionality to the following parts
+  - clock
+  - display
+  - connectivity (WiFi, NTP)
+
+Main filename m5_clock.ino
+
+Ask me relevant questions about my specific requirements and constraints so you can give me the most appropriate implementation advice.
+
+
+
+
+
+
+
+
+
+
+
