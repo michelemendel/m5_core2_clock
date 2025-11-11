@@ -105,11 +105,9 @@ void setup() {
   // Use loaded/saved time; if NTP later succeeds, it will update
   lastDisplayedTime = appClock.getTime();
   
-  // Set initial brightness based on charger status
+  // Load saved brightness (already done in display.begin())
+  // Set initial brightness based on charger status (only if not manually set)
   display.setBrightnessForCharger(io.isCharging());
-  // Switch to manual override and set an absolute startup brightness
-  display.increaseBrightnessStep(0); // sets manualBrightness=true without changing level
-  display.setBrightness(70);        // absolute value (range 0..255)
   
   // Initialize timers before first draw
   lastSecond = millis();
