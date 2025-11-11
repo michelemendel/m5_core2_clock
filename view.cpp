@@ -31,8 +31,11 @@ void View::navigateUp() {
     case VIEW_MAIN_MENU:
       mainViewSelection = static_cast<MenuItem>((static_cast<int>(mainViewSelection) - 1 + MAIN_VIEW_COUNT) % MAIN_VIEW_COUNT);
       break;
+    case VIEW_WIFI_SCAN:
     case VIEW_WIFI_SELECT:
-      wifiSelection = (wifiSelection - 1 + wifiCount) % wifiCount;
+      if (wifiCount > 0) {
+        wifiSelection = (wifiSelection - 1 + wifiCount) % wifiCount;
+      }
       break;
     case VIEW_TIME_SET:
       if (timeSettingField == 0) {
@@ -74,8 +77,11 @@ void View::navigateDown() {
     case VIEW_MAIN_MENU:
       mainViewSelection = static_cast<MenuItem>((static_cast<int>(mainViewSelection) + 1) % MAIN_VIEW_COUNT);
       break;
+    case VIEW_WIFI_SCAN:
     case VIEW_WIFI_SELECT:
-      wifiSelection = (wifiSelection + 1) % wifiCount;
+      if (wifiCount > 0) {
+        wifiSelection = (wifiSelection + 1) % wifiCount;
+      }
       break;
     case VIEW_TIME_SET:
       if (timeSettingField == 0) {
@@ -187,6 +193,12 @@ void View::back() {
 
 MenuItem View::getMainViewSelection() const {
   return mainViewSelection;
+}
+
+void View::setMainViewSelection(int index) {
+  if (index >= 0 && index < MAIN_VIEW_COUNT) {
+    mainViewSelection = static_cast<MenuItem>(index);
+  }
 }
 
 int View::getMainViewCount() const {

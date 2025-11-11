@@ -39,6 +39,7 @@ public:
   
   // Main menu
   MenuItem getMainViewSelection() const;
+  void setMainViewSelection(int index);
   int getMainViewCount() const;
   
   // WiFi menu

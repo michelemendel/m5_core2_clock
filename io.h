@@ -8,7 +8,10 @@ enum InputEvent {
   INPUT_BUTTON_UP,
   INPUT_BUTTON_DOWN,
   INPUT_BUTTON_SELECT,
-  INPUT_KEY_PRESSED
+  INPUT_BUTTON_BACK,
+  INPUT_KEY_PRESSED,
+  INPUT_TOUCH_SELECT,
+  INPUT_TOUCH_BACK
 };
 
 class IO {
@@ -24,20 +27,32 @@ public:
   void setTextInputMode(bool enabled);
   bool isTextInputMode() const { return textInputMode; }
   
+  // Touchscreen coordinate getters
+  int getTouchX() const { return lastTouchX; }
+  int getTouchY() const { return lastTouchY; }
+  
   bool isCharging() const;
   void handlePowerManagement();
   
 private:
   InputEvent lastEvent;
   char lastKey;
-  bool lastButtonState[3]; // Up, Down, Select
-  unsigned long lastDebounceTime;
-  static const unsigned long DEBOUNCE_DELAY = 30;  // Reduced from 50ms to be more responsive
+  bool lastButtonState[3]; // A, B, C buttons
+  unsigned long lastDebounceTime[3]; // Separate debounce timer for each button
+  static const unsigned long DEBOUNCE_DELAY = 50;
+  static const unsigned long LONG_PRESS_DELAY = 500; // Long press for back button
   bool wasCharging;
-  // Simple ESC/Arrow state machine: 0=none,1=ESC,2=ESC[
-  uint8_t escState = 0;
-  unsigned long escStartTime = 0;
   bool textInputMode = false;
+  
+  // Button press tracking for long press detection
+  unsigned long buttonCPressStart = 0;
+  bool buttonCWasPressed = false;
+  
+  // Touchscreen state
+  int lastTouchX = -1;
+  int lastTouchY = -1;
+  unsigned long lastTouchTime = 0;
+  static const unsigned long TOUCH_DEBOUNCE_DELAY = 200; // Prevent double-taps
 };
 
 #endif // IO_H

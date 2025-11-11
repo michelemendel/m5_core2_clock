@@ -1,11 +1,10 @@
 /*
- * M5Cardputer Clock Application
+ * M5Core2 Clock Application
  * 
  * For usage instructions and documentation, see README.md
  */
 
 #include <M5Unified.h>
-#include <M5Cardputer.h>  // Required for keyboard support
 #include <Preferences.h>
 #include <esp_sleep.h>
 #include "clock.h"
@@ -78,17 +77,17 @@ void clearSavedWiFiPassword() {
 // WiFi credentials are loaded/saved via Preferences; no hardcoded defaults
 
 void setup() {
-  // Configure M5 settings specifically for Cardputer
+  // Configure M5 settings for Core2
   auto cfg = M5.config();
   cfg.clear_display = true;
   cfg.output_power = true;  // Required for screen backlight and peripherals
   
-  // Initialize M5Cardputer with keyboard enabled
-  M5Cardputer.begin(cfg, true);  // true = enable keyboard
+  // Initialize M5Core2
+  M5.begin(cfg);
   
   // Initialize speaker for alarm
-  M5Cardputer.Speaker.begin();
-  M5Cardputer.Speaker.setVolume(128);  // Temporary default; will be overridden after load
+  M5.Speaker.begin();
+  M5.Speaker.setVolume(128);  // Temporary default; will be overridden after load
   
   // Serial still available but not needed for keyboard input anymore
   Serial.begin(115200);  // Serial for debugging (optional)
@@ -101,7 +100,7 @@ void setup() {
   // Load saved settings from flash memory (alarm, timezone, etc.)
   appClock.load();
   // Apply saved alarm volume
-  M5Cardputer.Speaker.setVolume(appClock.getAlarmVolume());
+  M5.Speaker.setVolume(appClock.getAlarmVolume());
   
   // Use loaded/saved time; if NTP later succeeds, it will update
   lastDisplayedTime = appClock.getTime();
@@ -178,8 +177,8 @@ void loop() {
 }
 
 void updateModules() {
-  // M5Cardputer.update() must be called in io.update() to poll keyboard
-  // This is critical - without this, keyboard won't work
+  // M5.update() must be called to poll buttons and touchscreen
+  M5.update();
   io.update();
   connectivity.update();
 }
@@ -204,7 +203,7 @@ InputEvent processInputEvents() {
   // If alarm is ringing, any key/button stops it
   if (appClock.isAlarmRinging() && event != INPUT_NONE) {
     appClock.stopAlarm();
-    M5Cardputer.Speaker.stop();  // Stop alarm sound
+    M5.Speaker.stop();  // Stop alarm sound
     io.clearInput();
     return INPUT_NONE;  // Consume this event, don't process as normal input
   }
@@ -224,8 +223,32 @@ InputEvent processInputEvents() {
   } else if (event == INPUT_BUTTON_SELECT) {
     handleViewSelect();
     io.clearInput();
+  } else if (event == INPUT_BUTTON_BACK) {
+    handleBack();
+    io.clearInput();
   } else if (event == INPUT_KEY_PRESSED) {
     handleKeyPressed();
+  }
+  
+  // Check for touchscreen input (only if no button event occurred)
+  // Also double-check that no buttons are currently pressed to prevent conflicts
+  // CRITICAL: Only process touch if we have NO button event AND no buttons are pressed
+  if (event == INPUT_NONE) {
+    // Triple-check: don't process touch if any button is currently pressed
+    bool anyButtonPressed = M5.BtnA.isPressed() || M5.BtnB.isPressed() || M5.BtnC.isPressed();
+    if (!anyButtonPressed) {
+      int touchX = io.getTouchX();
+      int touchY = io.getTouchY();
+      // Only process touch if coordinates are valid AND we still have no button event
+      // (double-check event in case it changed)
+      if (touchX >= 0 && touchY >= 0 && io.getInputEvent() == INPUT_NONE) {
+        handleTouchInput(touchX, touchY);
+        io.clearInput();
+      }
+    } else {
+      // If any button is pressed, clear touch coordinates to be safe
+      io.clearInput();
+    }
   }
   
   return event;
@@ -240,6 +263,13 @@ void handleButtonUp() {
     display.increaseBrightnessStep(10);
   } else {
     view.navigateUp();
+    // Force redraw for views that need it - get state after navigation
+    state = view.getState();
+    if (state == VIEW_TIMEZONE_SET) {
+      display.showTimezoneSetting(view.getTimezoneSelection());
+    } else if (state == VIEW_WIFI_SCAN || state == VIEW_WIFI_SELECT) {
+      display.showWiFiScan(wifiSSIDs, wifiSSIDCount, view.getWiFiSelection());
+    }
   }
 }
 
@@ -252,6 +282,105 @@ void handleButtonDown() {
     display.decreaseBrightnessStep(10);
   } else {
     view.navigateDown();
+    // Force redraw for views that need it - get state after navigation
+    state = view.getState();
+    if (state == VIEW_TIMEZONE_SET) {
+      display.showTimezoneSetting(view.getTimezoneSelection());
+    } else if (state == VIEW_WIFI_SCAN || state == VIEW_WIFI_SELECT) {
+      display.showWiFiScan(wifiSSIDs, wifiSSIDCount, view.getWiFiSelection());
+    }
+  }
+}
+
+void handleBack() {
+  // Handle back navigation (same logic as 'q' key from keyboard)
+  ViewItem prev = view.getState();
+  if (prev == VIEW_WIFI_PASSWORD) {
+    // Leaving password view, disable text input mode and clear pwd
+    io.setTextInputMode(false);
+  }
+  if (prev == VIEW_TIME_SET) {
+    // Save manual time setting when going back
+    appClock.setTime(view.getTimeHours(), view.getTimeMinutes());
+  }
+  if (prev == VIEW_TIMEZONE_SET) {
+    // Apply timezone and DST
+    Timezone oldTz = appClock.getTimezone();
+    int8_t oldTotal = oldTz.offsetHours + (oldTz.daylightSaving ? 1 : 0);
+    int newIndex = view.getTimezoneSelection();
+    appClock.setTimezoneIndex(newIndex);
+    appClock.setTimezoneDST(view.getTimezoneDST());
+    Timezone newTz = appClock.getTimezone();
+    int8_t newTotal = newTz.offsetHours + (newTz.daylightSaving ? 1 : 0);
+
+    // Prefer NTP sync if WiFi connected; fallback to local hour delta
+    if (connectivity.isConnected()) {
+      display.showSyncing();
+      if (connectivity.syncTime(newTz.offsetHours, newTz.daylightSaving)) {
+        struct tm timeinfo;
+        if (getLocalTime(&timeinfo)) {
+          appClock.setTime(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+        }
+      }
+    } else {
+      int delta = newTotal - oldTotal;
+      if (delta != 0) {
+        Time t = appClock.getTime();
+        int hours = (int)t.hours + delta;
+        while (hours < 0) hours += 24;
+        while (hours >= 24) hours -= 24;
+        appClock.setTime((uint8_t)hours, t.minutes, t.seconds);
+      }
+    }
+  }
+  view.back();
+  // After view.back(), the view state changes, but if we showed syncing,
+  // explicitly redraw the appropriate view to avoid getting stuck
+  if (view.getState() == VIEW_MAIN_MENU) {
+    display.showMainView(view.getMainViewSelection());
+  } else if (view.getState() == VIEW_CLOCK) {
+    Time time = appClock.getTime();
+    bool wifiConnected = connectivity.isTimeSynced();
+    Alarm alarm = appClock.getAlarm();
+    display.showClock(time, wifiConnected, alarm, appClock.getTimezone());
+  }
+  if (view.getState() == VIEW_WIFI_PASSWORD) {
+    wifiPassword = "";
+  }
+}
+
+void handleTouchInput(int x, int y) {
+  // Process touchscreen input based on current view
+  ViewItem state = view.getState();
+  
+  if (state == VIEW_WIFI_PASSWORD) {
+    // Handle on-screen keyboard input
+    char key = display.getKeyboardKeyAt(x, y);
+    if (key == 1) {
+      // Special code for shift toggle - redraw the keyboard
+      display.showWiFiPassword(wifiSSIDs[view.getWiFiSelection()], wifiPassword);
+    } else if (key != 0) {
+      handleKeyInput(key);
+    }
+  } else {
+    // Handle menu selection and back button
+    int selectedItem = display.getTouchedItem(x, y, state);
+    if (selectedItem >= 0) {
+      // Item was selected
+      if (state == VIEW_MAIN_MENU) {
+        view.setMainViewSelection(selectedItem);
+        handleViewSelect();
+      } else if (state == VIEW_WIFI_SELECT) {
+        view.setWiFiSelection(selectedItem);
+        handleViewSelect();
+      } else if (state == VIEW_TIMEZONE_SET) {
+        // Touch selection disabled for timezone - use buttons instead
+        // view.setTimezoneSelection(selectedItem);
+      }
+    } else if (state == VIEW_CLOCK) {
+      // Tap on clock view opens main menu
+      handleViewSelect();
+    }
   }
 }
 
@@ -263,58 +392,10 @@ void handleKeyPressed() {
     io.clearInput();
     return;
   }
-  // Check for back key
+  // Check for back key (legacy keyboard support)
   if (key == 'q' || key == 'Q') {  // 'q' or 'Q' for back
-    // Before going back from timezone view, apply timezone and DST
-    ViewItem prev = view.getState();
-    if (prev == VIEW_WIFI_PASSWORD) {
-      // Leaving password view, disable text input mode and clear pwd
-      io.setTextInputMode(false);
-    }
-    if (prev == VIEW_TIMEZONE_SET) {
-      // Apply timezone and DST
-      Timezone oldTz = appClock.getTimezone();
-      int8_t oldTotal = oldTz.offsetHours + (oldTz.daylightSaving ? 1 : 0);
-      int newIndex = view.getTimezoneSelection();
-      appClock.setTimezoneIndex(newIndex);
-      appClock.setTimezoneDST(view.getTimezoneDST());
-      Timezone newTz = appClock.getTimezone();
-      int8_t newTotal = newTz.offsetHours + (newTz.daylightSaving ? 1 : 0);
-
-      // Prefer NTP sync if WiFi connected; fallback to local hour delta
-      if (connectivity.isConnected()) {
-        display.showSyncing();
-        if (connectivity.syncTime(newTz.offsetHours, newTz.daylightSaving)) {
-          struct tm timeinfo;
-          if (getLocalTime(&timeinfo)) {
-            appClock.setTime(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-          }
-        }
-      } else {
-        int delta = newTotal - oldTotal;
-        if (delta != 0) {
-          Time t = appClock.getTime();
-          int hours = (int)t.hours + delta;
-          while (hours < 0) hours += 24;
-          while (hours >= 24) hours -= 24;
-          appClock.setTime((uint8_t)hours, t.minutes, t.seconds);
-        }
-      }
-    }
-    view.back();
-    // After view.back(), the view state changes, but if we showed syncing,
-    // explicitly redraw the appropriate view to avoid getting stuck
-    if (view.getState() == VIEW_MAIN_MENU) {
-      display.showMainView(view.getMainViewSelection());
-    } else if (view.getState() == VIEW_CLOCK) {
-      Time time = appClock.getTime();
-      bool wifiConnected = connectivity.isTimeSynced();
-      Alarm alarm = appClock.getAlarm();
-      display.showClock(time, wifiConnected, alarm, appClock.getTimezone());
-    }
-    if (view.getState() == VIEW_WIFI_PASSWORD) {
-      wifiPassword = "";
-    }
+    // Legacy keyboard back - use handleBack() function
+    handleBack();
     io.clearInput();
   } else {
     handleKeyInput(key);
@@ -333,8 +414,8 @@ void updateClockAndAlarms() {
     if (appClock.isAlarmTime() && !appClock.isAlarmRinging()) {
       appClock.startAlarm();
       // Start alarm sound (beep pattern)
-      M5Cardputer.Speaker.setVolume(appClock.getAlarmVolume());
-      M5Cardputer.Speaker.tone(800, 200);  // 800Hz for 200ms
+      M5.Speaker.setVolume(appClock.getAlarmVolume());
+      M5.Speaker.tone(800, 200);  // 800Hz for 200ms
       lastAlarmBeep = currentMillis;  // Initialize beep timer
     }
   }
@@ -345,8 +426,8 @@ void updateClockAndAlarms() {
     unsigned long currentMillis = millis();
     // Beep every second (1000ms intervals)
     if (currentMillis - lastAlarmBeep >= 1000) {
-      M5Cardputer.Speaker.setVolume(appClock.getAlarmVolume());
-      M5Cardputer.Speaker.tone(800, 200);  // 800Hz beep for 200ms
+      M5.Speaker.setVolume(appClock.getAlarmVolume());
+      M5.Speaker.tone(800, 200);  // 800Hz beep for 200ms
       lastAlarmBeep = currentMillis;
     }
   } else {
@@ -464,6 +545,7 @@ void handleViewSelect() {
       view.setState(VIEW_WIFI_PASSWORD);
       wifiPassword = "";
       io.setTextInputMode(true);
+      display.resetKeyboardShift(); // Reset to uppercase when entering password view
       break;
       
     case VIEW_WIFI_PASSWORD:
@@ -501,9 +583,8 @@ void handleViewSelect() {
           // Advance to minutes
           view.select();
         } else if (field == 1) {
-          // Save manual time and advance to NTP option
-          appClock.setTime(view.getTimeHours(), view.getTimeMinutes());
-          view.select(); // move to field 2
+          // Advance to NTP sync option
+          view.select();
         } else if (field == 2) {
           // Trigger NTP sync now
           display.showSyncing();
@@ -512,18 +593,17 @@ void handleViewSelect() {
             struct tm timeinfo;
             if (getLocalTime(&timeinfo)) {
               appClock.setTime(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
-              // Update the manual-set fields to the synced time and remain in view
+              // Update the manual-set fields to the synced time
               view.setTimeHours((uint8_t)timeinfo.tm_hour);
               view.setTimeMinutes((uint8_t)timeinfo.tm_min);
             }
           }
-          // Redraw time setting view after sync attempt to avoid getting stuck on "Syncing time..."
-          display.showTimeSetting(
-            view.getTimeHours(),
-            view.getTimeMinutes(),
-            view.getTimeSettingField()
-          );
-          // Stay on field 2 so user can sync again or ESC back
+          // After NTP sync, return to clock view
+          view.setState(VIEW_CLOCK);
+          Time time = appClock.getTime();
+          bool wifiConnected = connectivity.isTimeSynced();
+          Alarm alarm = appClock.getAlarm();
+          display.showClock(time, wifiConnected, alarm, appClock.getTimezone());
         }
       }
       break;
@@ -537,13 +617,44 @@ void handleViewSelect() {
         appClock.setAlarmAutoShutoffSeconds(view.getAlarmLengthSeconds());
         appClock.setAlarmVolume(view.getAlarmVolume());
         // Apply volume immediately
-        M5Cardputer.Speaker.setVolume(appClock.getAlarmVolume());
+        M5.Speaker.setVolume(appClock.getAlarmVolume());
         view.setState(VIEW_CLOCK);
       }
       break;
       
     case VIEW_TIMEZONE_SET:
-      // No-op on Enter; confirmation handled on ESC/back
+      // Apply timezone and return to main menu
+      {
+        Timezone oldTz = appClock.getTimezone();
+        int8_t oldTotal = oldTz.offsetHours + (oldTz.daylightSaving ? 1 : 0);
+        int newIndex = view.getTimezoneSelection();
+        appClock.setTimezoneIndex(newIndex);
+        appClock.setTimezoneDST(view.getTimezoneDST());
+        Timezone newTz = appClock.getTimezone();
+        int8_t newTotal = newTz.offsetHours + (newTz.daylightSaving ? 1 : 0);
+
+        // Prefer NTP sync if WiFi connected; fallback to local hour delta
+        if (connectivity.isConnected()) {
+          display.showSyncing();
+          if (connectivity.syncTime(newTz.offsetHours, newTz.daylightSaving)) {
+            struct tm timeinfo;
+            if (getLocalTime(&timeinfo)) {
+              appClock.setTime(timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+            }
+          }
+        } else {
+          int delta = newTotal - oldTotal;
+          if (delta != 0) {
+            Time t = appClock.getTime();
+            int hours = (int)t.hours + delta;
+            while (hours < 0) hours += 24;
+            while (hours >= 24) hours -= 24;
+            appClock.setTime((uint8_t)hours, t.minutes, t.seconds);
+          }
+        }
+        view.setState(VIEW_MAIN_MENU);
+        display.showMainView(view.getMainViewSelection());
+      }
       break;
     
     case VIEW_DST_SET:

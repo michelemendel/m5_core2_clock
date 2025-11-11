@@ -1,332 +1,10 @@
 #include "display.h"
+#include "view.h"
+#include "calendar.h"
 #include <M5Unified.h>
 #include <time.h>
 #include <math.h>
-
-// Calculate if a Hebrew year is a leap year
-static bool isHebrewLeapYear(int year) {
-  int cycleYear = ((year - 1) % 19) + 1;
-  return (cycleYear == 3 || cycleYear == 6 || cycleYear == 8 || cycleYear == 11 || 
-          cycleYear == 14 || cycleYear == 17 || cycleYear == 19);
-}
-
-// Get number of days in a Hebrew year
-static int getHebrewYearDays(int year) {
-  // Use long to avoid integer overflow
-  long moladOffset = ((long)(year - 1) % 19) * 235L + ((long)(year - 1) / 19) * 6939L + 347605L;
-  long moladDays = moladOffset / 25920L;
-  long moladParts = moladOffset % 25920L;
-  
-  // Calculate Rosh Hashanah delay rules
-  int dayOfWeek = (int)((moladDays + 1) % 7); // 0=Monday, 1=Tuesday, etc.
-  
-  // Calculate delays
-  int delay = 0;
-  if (moladParts >= 19440) delay = 1; // Molad Zaken
-  if (dayOfWeek == 1 && moladParts >= 19440 && !isHebrewLeapYear(year)) delay = 2; // GaTRaD
-  if (dayOfWeek == 0 && moladParts >= 20484 && isHebrewLeapYear(year)) delay = 2; // BeTuTaKF
-  
-  long roshHashanah = moladDays + delay;
-  
-  // Next year's Rosh Hashanah
-  long nextMoladOffset = ((long)year % 19) * 235L + ((long)year / 19) * 6939L + 347605L;
-  long nextMoladDays = nextMoladOffset / 25920L;
-  long nextMoladParts = nextMoladOffset % 25920L;
-  int nextDayOfWeek = (int)((nextMoladDays + 1) % 7);
-  int nextDelay = 0;
-  if (nextMoladParts >= 19440) nextDelay = 1;
-  if (nextDayOfWeek == 1 && nextMoladParts >= 19440 && !isHebrewLeapYear(year + 1)) nextDelay = 2;
-  if (nextDayOfWeek == 0 && nextMoladParts >= 20484 && isHebrewLeapYear(year + 1)) nextDelay = 2;
-  long nextRoshHashanah = nextMoladDays + nextDelay;
-  
-  int yearDays = (int)(nextRoshHashanah - roshHashanah);
-  
-  // Sanity check - Hebrew years should be 353-385 days
-  if (yearDays < 353 || yearDays > 385) {
-    // Fallback: approximate based on leap year
-    return isHebrewLeapYear(year) ? 384 : 354;
-  }
-  
-  return yearDays;
-}
-
-// Calculate days from Hebrew epoch (Tishrei 1, 3761 BCE)
-static long daysFromHebrewEpoch(int hYear) {
-  long days = 0;
-  for (int y = 1; y < hYear; y++) {
-    days += getHebrewYearDays(y);
-  }
-  return days;
-}
-
-// Get number of days in a Hebrew month
-static int getHebrewMonthDays(int hYear, int hMonth) {
-  // Hebrew months: Tishrei(1), Cheshvan(2), Kislev(3), Tevet(4), Shevat(5), 
-  //                Adar(6) or Adar I(6)/Adar II(7) in leap years,
-  //                Nisan(7/8), Iyar(8/9), Sivan(9/10), Tammuz(10/11), Av(11/12), Elul(12/13)
-  // In leap years, month 6 = Adar I (30 days), month 7 = Adar II (29 days)
-  bool isLeap = isHebrewLeapYear(hYear);
-  
-  int standardDays[] = {30, 29, 30, 29, 30, 29, 30, 29, 30, 29, 30, 29};
-  
-  if (hMonth == 2) { // Cheshvan
-    int yearDays = getHebrewYearDays(hYear);
-    return (yearDays % 30 == 0) ? 30 : 29; // Complete vs deficient
-  } else if (hMonth == 3) { // Kislev
-    int yearDays = getHebrewYearDays(hYear);
-    return (yearDays % 30 == 1) ? 30 : 29;
-  } else if (hMonth == 6) { // Adar or Adar I
-    return isLeap ? 30 : 29; // Adar I = 30 days in leap years, Adar = 29 in non-leap
-  } else if (hMonth == 7) {
-    if (isLeap) {
-      return 29; // Adar II in leap years
-    } else {
-      // In non-leap years, month 7 is Nisan
-      return standardDays[6]; // Nisan = 30
-    }
-  } else if (hMonth > 7 && !isLeap) {
-    // In non-leap years, months 8-12 map to Iyar-Elul (indices 7-11 in standard array)
-    return standardDays[hMonth - 1]; // Month 8->index 7, month 9->index 8, etc.
-  } else if (hMonth > 7 && isLeap) {
-    // In leap years, months 8-13 map to Nisan-Elul (indices 6-11 in standard array)
-    return standardDays[hMonth - 2]; // Month 8->index 6, month 9->index 7, etc.
-  }
-  
-  return standardDays[hMonth - 1];
-}
-
-// Convert Gregorian date to absolute day number (days since Jan 1, 1 CE)
-static long gregorianToAbsolute(int year, int month, int day) {
-  long absolute = 0;
-  
-  // Days in previous years
-  for (int y = 1; y < year; y++) {
-    absolute += ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)) ? 366 : 365;
-  }
-  
-  // Days in previous months of current year
-  int monthDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-  for (int m = 1; m < month; m++) {
-    int days = monthDays[m - 1];
-    if (m == 2 && ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0))) {
-      days = 29;
-    }
-    absolute += days;
-  }
-  
-  absolute += day - 1; // Days in current month (0-indexed)
-  
-  return absolute;
-}
-
-// Calculate approximate sunset time in minutes since midnight (local time)
-// Uses a simplified calculation based on date and assumes ~mid-latitude (~35-40°)
-// timezoneOffsetHours: UTC offset (e.g., -5 for EST, +2 for EET)
-// dstOffset: additional hour if DST is in effect
-static int calculateSunsetHour(int year, int month, int day, int timezoneOffsetHours, bool dstOffset) {
-  // Approximate day of year
-  int monthDays[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-  int dayOfYear = day;
-  for (int m = 1; m < month; m++) {
-    dayOfYear += monthDays[m];
-    if (m == 2 && ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0))) {
-      dayOfYear += 1;
-    }
-  }
-  
-  // Calculate approximate sunset in UTC
-  // Base time varies by latitude: at equator ~18:00, at 40°N ~17:30-20:30 depending on season
-  // For mid-latitudes (35-40°), approximate as 18:00 ± 1.5 hours seasonal variation
-  double n = (double)dayOfYear;
-  double sunsetHourUTC = 18.0 + 1.5 * sin((n - 81.0) * 2.0 * 3.14159265358979323846 / 365.0);
-  
-  // Convert to local time by adding timezone offset and DST
-  double sunsetHourLocal = sunsetHourUTC + timezoneOffsetHours + (dstOffset ? 1.0 : 0.0);
-  
-  // Normalize to 0-24 hour range
-  while (sunsetHourLocal < 0.0) sunsetHourLocal += 24.0;
-  while (sunsetHourLocal >= 24.0) sunsetHourLocal -= 24.0;
-  
-  return (int)(sunsetHourLocal * 60); // Return minutes since midnight in local time
-}
-
-// Hebrew calendar conversion helper
-// Uses accurate calculation based on molad and Hebrew calendar rules
-// timezoneOffsetHours: UTC offset (e.g., -5 for EST, +2 for EET)
-// dstOffset: true if DST is currently in effect
-static void convertToHebrewDate(struct tm* gregorian, int* hebrewYear, int* hebrewMonth, int* hebrewDay, int timezoneOffsetHours, bool dstOffset) {
-  int gYear = 1900 + gregorian->tm_year;
-  int gMonth = gregorian->tm_mon + 1;
-  int gDay = gregorian->tm_mday;
-  int gHour = gregorian->tm_hour;
-  int gMinute = gregorian->tm_min;
-  
-  // Hebrew calendar day starts at sunset (shkia) in local time
-  // If current time is after sunset, the Hebrew day has begun, so use next day's Gregorian date
-  int sunsetMinutes = calculateSunsetHour(gYear, gMonth, gDay, timezoneOffsetHours, dstOffset);
-  int currentMinutes = gHour * 60 + gMinute;
-  
-  // If after sunset, use next Gregorian date for Hebrew calculation
-  // (because the Hebrew calendar day has already started)
-  if (currentMinutes >= sunsetMinutes) {
-    gDay++;
-    // Get days in current month
-    int monthDays[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    int daysInMonth = monthDays[gMonth - 1];
-    if (gMonth == 2 && ((gYear % 4 == 0 && gYear % 100 != 0) || (gYear % 400 == 0))) {
-      daysInMonth = 29;
-    }
-    if (gDay > daysInMonth) {
-      gDay = 1;
-      gMonth++;
-      if (gMonth > 12) {
-        gMonth = 1;
-        gYear++;
-      }
-    }
-  }
-  
-  // Convert to absolute days since Jan 1, 1 CE
-  long gregorianDays = gregorianToAbsolute(gYear, gMonth, gDay);
-  
-  // Use known accurate reference: Nov 1, 2025 = 10 Cheshvan 5786
-  long refGregorianDays = gregorianToAbsolute(2025, 11, 1);
-  long daysDiff = gregorianDays - refGregorianDays;
-  
-  // If we're exactly on the reference date, return it directly
-  if (daysDiff == 0) {
-    *hebrewYear = 5786;
-    *hebrewMonth = 2; // Cheshvan
-    *hebrewDay = 10;
-    return;
-  }
-  
-  // Reference Hebrew date: 10 Cheshvan 5786
-  // Tishrei = 30 days (days 0-29 in 0-indexed)
-  // Cheshvan day 10 = day 30 + 9 = day 39 in 0-indexed (the 40th day)
-  int refDaysFromYearStart = 30 + 9; // Day 39 (0-indexed) = day 40 (1-indexed) = 10 Cheshvan
-  
-  // Calculate total days from Tishrei 1, 5786
-  long totalDaysFromTishrei5786 = refDaysFromYearStart + daysDiff;
-  
-  // Clamp daysDiff to reasonable range (-1000 to +1000 days) to prevent huge errors
-  if (daysDiff > 1000 || daysDiff < -1000) {
-    // Something is very wrong with the date, fall back to reference
-    *hebrewYear = 5786;
-    *hebrewMonth = 2;
-    *hebrewDay = 10;
-    return;
-  }
-  
-  // Start with year 5786 and adjust as needed
-  int hYear = 5786;
-  long remainingDays = totalDaysFromTishrei5786;
-  
-  // Adjust backwards if needed
-  while (remainingDays < 0 && hYear > 1) {
-    hYear--;
-    int yearDays = getHebrewYearDays(hYear);
-    if (yearDays <= 0 || yearDays > 400) {
-      // Sanity check: Hebrew years should be 353-385 days
-      yearDays = 354; // Default fallback
-    }
-    remainingDays += yearDays;
-    if (hYear < 5700) break; // Safety limit
-  }
-  
-  // Adjust forwards if needed  
-  int yearDays = getHebrewYearDays(hYear);
-  if (yearDays <= 0 || yearDays > 400) {
-    yearDays = 354; // Default fallback
-  }
-  
-  int loopCount = 0;
-  while (remainingDays >= yearDays && loopCount < 100) { // Safety limit
-    remainingDays -= yearDays;
-    hYear++;
-    yearDays = getHebrewYearDays(hYear);
-    if (yearDays <= 0 || yearDays > 400) {
-      yearDays = 354; // Default fallback
-    }
-    loopCount++;
-  }
-  
-  // Now remainingDays is 0-indexed days within the correct Hebrew year
-  // Find the month and day
-  int hMonth = 1;
-  int hDay = 1;
-  
-  // Clamp remainingDays to reasonable range
-  if (remainingDays < 0) remainingDays = 0;
-  if (remainingDays > 400) {
-    // Something went very wrong, fall back to reference date
-    hYear = 5786;
-    hMonth = 2;
-    hDay = 10;
-    *hebrewYear = hYear;
-    *hebrewMonth = hMonth;
-    *hebrewDay = hDay;
-    return;
-  }
-  
-  int daysCounted = 0;
-  bool isLeap = isHebrewLeapYear(hYear);
-  int maxMonth = isLeap ? 13 : 12;
-  
-  for (int m = 1; m <= maxMonth && daysCounted <= remainingDays; m++) {
-    int monthDays = getHebrewMonthDays(hYear, m);
-    if (monthDays <= 0 || monthDays > 32) {
-      monthDays = 30; // Fallback
-    }
-    
-    if (daysCounted + monthDays > remainingDays) {
-      hMonth = m;
-      hDay = remainingDays - daysCounted + 1;
-      if (hDay < 1) hDay = 1;
-      if (hDay > monthDays) hDay = monthDays;
-      break;
-    }
-    daysCounted += monthDays;
-  }
-  
-  // Safety check
-  if (hMonth < 1 || hMonth > 13) {
-    hYear = 5786;
-    hMonth = 2;
-    hDay = 10;
-  }
-  
-  // Map month number to display month (Adar I and Adar II both display as "Adar")
-  if (hMonth == 7 && isLeap) {
-    hMonth = 6; // Adar II displays as "Adar"
-  } else if (hMonth > 6 && isLeap) {
-    hMonth--; // Shift months after Adar: 8->7 (Nisan), 9->8 (Iyar), etc.
-  }
-  
-  *hebrewYear = hYear;
-  *hebrewMonth = hMonth;
-  *hebrewDay = hDay;
-}
-
-static String formatHebrewDate(struct tm* timeinfo, int timezoneOffsetHours, bool dstOffset) {
-  int hYear, hMonth, hDay;
-  convertToHebrewDate(timeinfo, &hYear, &hMonth, &hDay, timezoneOffsetHours, dstOffset);
-  
-  // Transliterated Hebrew month names
-  const char* hebrewMonths[] = {
-    "Tishrei", "Cheshvan", "Kislev", "Tevet", "Shevat", "Adar",
-    "Nisan", "Iyar", "Sivan", "Tamuz", "Av", "Elul"
-  };
-  
-  // Format as: "10 Cheshvan 5786" (transliterated, no "b'" prefix)
-  char dateBuf[64];
-  String monthStr = hebrewMonths[hMonth - 1];
-  if (hMonth < 1 || hMonth > 12) monthStr = "Cheshvan"; // fallback
-  
-  snprintf(dateBuf, sizeof(dateBuf), "%d %s %d", hDay, monthStr.c_str(), hYear);
-  
-  return String(dateBuf);
-}
+#include <string.h>
 
 Display::Display() {
   screenWidth = 0;
@@ -377,25 +55,28 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
   if (!initialClockDrawn) {
     M5.Display.fillScreen(TFT_BLACK);
 
-    // Draw main time (default spacing)
+    // Draw main time with segment-style font (digital clock look)
+    // Clear time area first to remove any artifacts - use larger clear area
+    int timeY = screenHeight / 2 - 20;
+    M5.Display.fillRect(0, timeY - 50, screenWidth, 100, TFT_BLACK);
+    M5.Display.setFont(&fonts::Font7);  // Seven-segment style font
     M5.Display.setTextDatum(MC_DATUM);
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-    M5.Display.setTextSize(4);
-    M5.Display.drawString(timeStr, screenWidth / 2, screenHeight / 2 - 10);
+    M5.Display.drawString(timeStr, screenWidth / 2, timeY);
 
-    // Draw Hebrew date line (between time and common date)
+    // Draw Hebrew date line (more spacing from time) - use smaller nice font
     {
       struct tm timeinfo;
       if (getLocalTime(&timeinfo, 0)) {
         String hebrewDateStr = formatHebrewDate(&timeinfo, timezone.offsetHours, timezone.daylightSaving);
-        M5.Display.setTextSize(2);
+        M5.Display.setFont(&fonts::FreeSans9pt7b);  // Smaller smooth font for Hebrew date
         M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
         M5.Display.setTextDatum(MC_DATUM);
-        M5.Display.drawString(hebrewDateStr, screenWidth / 2, screenHeight / 2 + 15);
+        M5.Display.drawString(hebrewDateStr, screenWidth / 2, screenHeight / 2 + 45);
       }
     }
 
-    // Draw common date line (below Hebrew date)
+    // Draw common date line (more spacing from Hebrew date) - use smaller nice font
     {
       struct tm timeinfo;
       char dateStr[32] = "";
@@ -404,10 +85,10 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
         const char* w = (timeinfo.tm_wday >= 0 && timeinfo.tm_wday <= 6) ? wdays[timeinfo.tm_wday] : "";
         snprintf(dateStr, sizeof(dateStr), "%s %04d-%02d-%02d", w, 1900 + timeinfo.tm_year, timeinfo.tm_mon + 1, timeinfo.tm_mday);
       }
-      M5.Display.setTextSize(2);
+      M5.Display.setFont(&fonts::FreeSans9pt7b);  // Smaller smooth font for common date
       M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
       M5.Display.setTextDatum(MC_DATUM);
-      M5.Display.drawString(String(dateStr), screenWidth / 2, screenHeight / 2 + 35);
+      M5.Display.drawString(String(dateStr), screenWidth / 2, screenHeight / 2 + 75);
     }
 
     // Build status line content
@@ -415,11 +96,12 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
     if (timezone.offsetHours >= 0) tzDisplay += "+";
     tzDisplay += String(timezone.offsetHours);
 
-    // Draw status line (WiFi, TZ left; DST right)
+    // Draw status line (WiFi, TZ left; DST right) - use very small font
+    M5.Display.setFont(nullptr);  // Use default font
+    M5.Display.setTextSize(1);  // Smallest size for status bar
     M5.Display.setTextDatum(TL_DATUM);
-    M5.Display.setTextSize(1);
-    int y = 5;
-    int sx = 10;
+    int y = 3;
+    int sx = 5;
 
     M5.Display.setTextColor(wifiConnected ? TFT_GREEN : TFT_RED, TFT_BLACK);
     String wifiStr = hasWifiOverride ? wifiOverride : (wifiConnected ? "WiFi" : "No WiFi");
@@ -436,12 +118,12 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
     // Right-align alarm time (where DST used to be), reserving space on far right for battery/voltage
     M5.Display.setTextDatum(TR_DATUM);
     // Clear alarm area first
-    M5.Display.fillRect(screenWidth - 110, y - 2, 100, 12, TFT_BLACK);
+    M5.Display.fillRect(screenWidth - 80, y - 1, 75, 10, TFT_BLACK);
     if (alarm.enabled) {
       char alarmTimeStr[6];
       snprintf(alarmTimeStr, sizeof(alarmTimeStr), "%02d:%02d", alarm.hours, alarm.minutes);
       M5.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
-      M5.Display.drawString(alarmTimeStr, screenWidth - 100, y);
+      M5.Display.drawString(alarmTimeStr, screenWidth - 70, y);
     }
     M5.Display.setTextDatum(TL_DATUM);
 
@@ -454,20 +136,22 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
     // Simple stable rule: only show charging when USB likely present
     // Require isCharging and voltage >= 4.05V and battery < 100%
     bool showCharging = charging && (smoothLevel < 100) && (voltage >= 4.05f);
-    M5.Display.setTextSize(1);
+    M5.Display.setFont(nullptr);  // Use default font
+    M5.Display.setTextSize(1);  // Smallest size for battery
     M5.Display.setTextColor(showCharging ? TFT_YELLOW : TFT_WHITE, TFT_BLACK);
     // Voltage-derived estimate when unplugged to improve accuracy
     int voltagePct = (int)constrain(((voltage - 3.50f) / (4.20f - 3.50f)) * 100.0f, 0.0f, 100.0f);
     int displayPct = charging ? smoothLevel : (int)(smoothLevel * 0.3f + voltagePct * 0.7f);
     String bat = String(displayPct) + "%";
     if (showCharging) bat = "+" + bat;
-    M5.Display.drawString(bat, screenWidth - 6, y);
-    M5.Display.setTextSize(1);
+    M5.Display.drawString(bat, screenWidth - 5, y);
+    M5.Display.setFont(nullptr);  // Use default font
+    M5.Display.setTextSize(1);  // Smallest size for voltage
     M5.Display.setTextDatum(TR_DATUM);
     char vbuf[16];
     snprintf(vbuf, sizeof(vbuf), "%.2fV", voltage);
     M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
-    M5.Display.drawString(String(vbuf), screenWidth - 6, y + 10);
+    M5.Display.drawString(String(vbuf), screenWidth - 5, y + 10);
     // Removed lightning icon
 
     // Cache status
@@ -484,35 +168,41 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
   }
 
   // Incremental updates below
-  // 1) Update main time
+  // 1) Update main time with segment-style font - clear area first
+  int timeY = screenHeight / 2 - 20;
+  // Clear time area to remove any artifacts or old text - use larger clear area
+  // Reset font to default before clearing to ensure proper clearing
+  M5.Display.setFont(nullptr);
+  M5.Display.fillRect(0, timeY - 50, screenWidth, 100, TFT_BLACK);
+  // Now set the segment font and draw
+  M5.Display.setFont(&fonts::Font7);  // Seven-segment style font
   M5.Display.setTextDatum(MC_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(4);
-  M5.Display.drawString(timeStr, screenWidth / 2, screenHeight / 2 - 10);
+  M5.Display.drawString(timeStr, screenWidth / 2, timeY);
 
-  // 2) Update Hebrew date and common date lines
+  // 2) Update Hebrew date and common date lines with better spacing
   {
-    // Clear area for Hebrew and common date
-    int dy = screenHeight / 2 + 15;
-    M5.Display.fillRect(0, dy - 12, screenWidth, 40, TFT_BLACK);
+    // Clear area for Hebrew and common date (more space to prevent overlap)
+    int dy = screenHeight / 2 + 45;
+    M5.Display.fillRect(0, dy - 15, screenWidth, 60, TFT_BLACK);
     
     struct tm timeinfo;
     if (getLocalTime(&timeinfo, 0)) {
       // Hebrew date line
       String hebrewDateStr = formatHebrewDate(&timeinfo, timezone.offsetHours, timezone.daylightSaving);
-      M5.Display.setTextSize(2);
+      M5.Display.setFont(&fonts::FreeSans9pt7b);  // Smaller smooth font for Hebrew date
       M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
       M5.Display.setTextDatum(MC_DATUM);
       M5.Display.drawString(hebrewDateStr, screenWidth / 2, dy);
       
-      // Common date line
+      // Common date line (more spacing from Hebrew date to prevent overlap)
       char dateStr[32] = "";
       const char* wdays[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
       const char* w = (timeinfo.tm_wday >= 0 && timeinfo.tm_wday <= 6) ? wdays[timeinfo.tm_wday] : "";
       snprintf(dateStr, sizeof(dateStr), "%s %04d-%02d-%02d", w, 1900 + timeinfo.tm_year, timeinfo.tm_mon + 1, timeinfo.tm_mday);
-      M5.Display.setTextSize(2);
+      M5.Display.setFont(&fonts::FreeSans9pt7b);  // Smaller smooth font for common date
       M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-      M5.Display.drawString(String(dateStr), screenWidth / 2, dy + 20);
+      M5.Display.drawString(String(dateStr), screenWidth / 2, dy + 30);
     }
   }
 
@@ -530,13 +220,14 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
                          (alarm.enabled != lastAlarmEnabled) ||
                          (alarm.enabled && (alarm.hours != lastAlarmHours || alarm.minutes != lastAlarmMinutes));
     if (statusChanged) {
-      // Clear top bar area
-      M5.Display.fillRect(0, 0, screenWidth, 20, TFT_BLACK);
-      // Redraw status items (WiFi, TZ left; DST right)
+      // Clear top bar area (smaller now)
+      M5.Display.fillRect(0, 0, screenWidth, 18, TFT_BLACK);
+      // Redraw status items (WiFi, TZ left; DST right) - use very small font
+      M5.Display.setFont(nullptr);  // Use default font
+      M5.Display.setTextSize(1);  // Smallest size for status bar
       M5.Display.setTextDatum(TL_DATUM);
-      M5.Display.setTextSize(1);
-      int y = 5;
-      int x = 10;
+      int y = 3;
+      int x = 5;
 
       M5.Display.setTextColor(wifiConnected ? TFT_GREEN : TFT_RED, TFT_BLACK);
       String wifiStr = wifiStrNow;
@@ -553,12 +244,12 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
       // Right-align alarm time (where DST used to be)
       M5.Display.setTextDatum(TR_DATUM);
       // Clear alarm area first
-      M5.Display.fillRect(screenWidth - 110, y - 2, 100, 12, TFT_BLACK);
+      M5.Display.fillRect(screenWidth - 80, y - 1, 75, 10, TFT_BLACK);
       if (alarm.enabled) {
         char alarmTimeStr[6];
         snprintf(alarmTimeStr, sizeof(alarmTimeStr), "%02d:%02d", alarm.hours, alarm.minutes);
         M5.Display.setTextColor(TFT_YELLOW, TFT_BLACK);
-        M5.Display.drawString(alarmTimeStr, screenWidth - 100, y);
+        M5.Display.drawString(alarmTimeStr, screenWidth - 70, y);
       }
       M5.Display.setTextDatum(TL_DATUM);
 
@@ -575,15 +266,16 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
 
   // 4) Battery area: small targeted clear and redraw every tick
   {
-    int y = 5;
+    int y = 3;
     // Clear a small box on the right for battery texts and icon
-    M5.Display.fillRect(screenWidth - 90, 0, 90, 22, TFT_BLACK);
+    M5.Display.fillRect(screenWidth - 70, 0, 70, 18, TFT_BLACK);
     int level = M5.Power.getBatteryLevel();
     int smoothLevel = getSmoothedBatteryLevel(level);
     bool charging = M5.Power.isCharging();
     float voltage = M5.Power.getBatteryVoltage() / 1000.0f;  // Convert mV to V
     bool showCharging = charging && (smoothLevel < 100) && (voltage >= 4.05f);
-    M5.Display.setTextSize(1);
+    M5.Display.setFont(nullptr);  // Use default font
+    M5.Display.setTextSize(1);  // Smallest size for battery
     M5.Display.setTextDatum(TR_DATUM);
     M5.Display.setTextColor(showCharging ? TFT_YELLOW : TFT_WHITE, TFT_BLACK);
     // Voltage-derived estimate when unplugged to improve accuracy
@@ -591,13 +283,14 @@ void Display::showClock(const Time& time, bool wifiConnected, const Alarm& alarm
     int displayPct = charging ? smoothLevel : (int)(smoothLevel * 0.3f + voltagePct * 0.7f);
     String bat = String(displayPct) + "%";
     if (showCharging) bat = "+" + bat;
-    M5.Display.drawString(bat, screenWidth - 6, y);
-    M5.Display.setTextSize(1);
+    M5.Display.drawString(bat, screenWidth - 5, y);
+    M5.Display.setFont(nullptr);  // Use default font
+    M5.Display.setTextSize(1);  // Smallest size for voltage
     M5.Display.setTextDatum(TR_DATUM);
     char vbuf[16];
     snprintf(vbuf, sizeof(vbuf), "%.2fV", voltage);
     M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
-    M5.Display.drawString(String(vbuf), screenWidth - 6, y + 10);
+    M5.Display.drawString(String(vbuf), screenWidth - 5, y + 10);
     // Removed lightning icon
   }
 }
@@ -606,12 +299,14 @@ void Display::showMainView(int selection) {
   // Leaving clock view; force next clock draw to fully refresh
   initialClockDrawn = false;
   M5.Display.fillScreen(TFT_BLACK);
+  
   M5.Display.setTextDatum(TL_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   M5.Display.setTextSize(2);
   
   const char* items[] = {"Set Alarm", "WiFi Setup", "Set Time", "Set Timezone", "Set DST"};
   
+  // Start menu items at top
   int y = 16;
   for (int i = 0; i < 5; i++) {
     if (i == selection) {
@@ -629,6 +324,7 @@ void Display::showWiFiScan(const String* ssids, int count, int selection) {
   // Leaving clock view; force next clock draw to fully refresh
   initialClockDrawn = false;
   M5.Display.fillScreen(TFT_BLACK);
+  
   M5.Display.setTextDatum(TL_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   M5.Display.setTextSize(2);
@@ -664,11 +360,11 @@ void Display::showWiFiScan(const String* ssids, int count, int selection) {
 void Display::showWiFiPassword(const String& ssid, const String& password) {
   // Leaving clock view; force next clock draw to fully refresh
   initialClockDrawn = false;
+  // Don't reset keyboardShift here - let it persist so shift button works
   M5.Display.fillScreen(TFT_BLACK);
   M5.Display.setTextDatum(TL_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   M5.Display.setTextSize(2);
-  
   M5.Display.drawString("Password for:", 10, 10);
   
   // Truncate SSID if too long
@@ -678,29 +374,82 @@ void Display::showWiFiPassword(const String& ssid, const String& password) {
   }
   M5.Display.drawString(displaySSID, 10, 30);
   
-  M5.Display.setTextSize(3);
-  M5.Display.setTextDatum(MC_DATUM);
-  
-  // Show password with masking - show actual length
-  String masked = "";
-  int pwdLen = password.length();
-  for (int i = 0; i < pwdLen; i++) {
-    masked += "*";
-  }
-  if (masked.length() == 0) {
-    masked = "_";
+  // Show password in clear text
+  M5.Display.setTextSize(2);
+  M5.Display.setTextDatum(TL_DATUM);
+  if (password.length() == 0) {
+    M5.Display.drawString("_", 10, 55);
+  } else {
+    M5.Display.drawString(password, 10, 55);
   }
   
-  // Display password - use smaller font if very long
-  if (pwdLen > 15) {
-    M5.Display.setTextSize(2);
-  }
-  M5.Display.drawString(masked, screenWidth / 2, screenHeight / 2);
+  // On-screen keyboard layout (QWERTY, compact)
+  // Row 1: Q W E R T Y U I O P
+  // Row 2: A S D F G H J K L
+  // Row 3: Z X C V B N M
+  // Row 4: Shift, Space, Backspace, Enter
+  const char* keyboardRowsUpper[] = {
+    "QWERTYUIOP",
+    "ASDFGHJKL",
+    "ZXCVBNM",
+    "  \b\n"
+  };
+  const char* keyboardRowsLower[] = {
+    "qwertyuiop",
+    "asdfghjkl",
+    "zxcvbnm",
+    "  \b\n"
+  };
+  const char** keyboardRows = keyboardShift ? keyboardRowsLower : keyboardRowsUpper;
   
-  M5.Display.setTextSize(1);
-  M5.Display.setTextDatum(BL_DATUM);
-  M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  // No bottom navigation hints
+  int keyWidth = 28;
+  int keyHeight = 30;
+  int keySpacing = 2;
+  int startY = 85;  // Moved up since no back button
+  int startX = 10;
+  
+  for (int row = 0; row < 4; row++) {
+    int rowLen = strlen(keyboardRows[row]);
+    int rowStartX = startX;
+    if (row == 1) rowStartX += keyWidth / 2; // Offset second row
+    if (row == 2) rowStartX += keyWidth; // Offset third row
+    if (row == 3) {
+      // Special keys row
+      // Shift button
+      M5.Display.fillRect(rowStartX, startY + row * (keyHeight + keySpacing), keyWidth * 2, keyHeight, keyboardShift ? TFT_DARKGREEN : TFT_DARKGRAY);
+      M5.Display.setTextColor(TFT_WHITE, keyboardShift ? TFT_DARKGREEN : TFT_DARKGRAY);
+      M5.Display.setTextSize(1);
+      M5.Display.drawString("Shift", rowStartX + keyWidth, startY + row * (keyHeight + keySpacing) + keyHeight / 2);
+      
+      // Space (wider)
+      M5.Display.fillRect(rowStartX + keyWidth * 2 + keySpacing, startY + row * (keyHeight + keySpacing), keyWidth * 3, keyHeight, TFT_DARKGRAY);
+      M5.Display.setTextColor(TFT_WHITE, TFT_DARKGRAY);
+      M5.Display.drawString("Space", rowStartX + keyWidth * 3.5, startY + row * (keyHeight + keySpacing) + keyHeight / 2);
+      
+      // Backspace
+      M5.Display.fillRect(rowStartX + keyWidth * 5 + keySpacing * 2, startY + row * (keyHeight + keySpacing), keyWidth * 2, keyHeight, TFT_DARKGRAY);
+      M5.Display.drawString("Del", rowStartX + keyWidth * 6, startY + row * (keyHeight + keySpacing) + keyHeight / 2);
+      
+      // Enter
+      M5.Display.fillRect(rowStartX + keyWidth * 7 + keySpacing * 3, startY + row * (keyHeight + keySpacing), keyWidth * 2, keyHeight, TFT_DARKGREEN);
+      M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
+      M5.Display.drawString("Enter", rowStartX + keyWidth * 8, startY + row * (keyHeight + keySpacing) + keyHeight / 2);
+      break;
+    }
+    
+    for (int col = 0; col < rowLen; col++) {
+      int x = rowStartX + col * (keyWidth + keySpacing);
+      int y = startY + row * (keyHeight + keySpacing);
+      M5.Display.fillRect(x, y, keyWidth, keyHeight, TFT_DARKGRAY);
+      M5.Display.setTextColor(TFT_WHITE, TFT_DARKGRAY);
+      M5.Display.setTextSize(2);
+      M5.Display.setTextDatum(MC_DATUM);
+      char keyStr[2] = {keyboardRows[row][col], '\0'};
+      M5.Display.drawString(keyStr, x + keyWidth / 2, y + keyHeight / 2);
+    }
+  }
+  
+  M5.Display.setTextDatum(TL_DATUM);
 }
 
 void Display::showTimeSetting(uint8_t hours, uint8_t minutes, int field) {
@@ -895,6 +644,7 @@ void Display::showTimezoneSetting(int selection) {
   // Leaving clock view; force next clock draw to fully refresh
   initialClockDrawn = false;
   M5.Display.fillScreen(TFT_BLACK);
+  
   M5.Display.setTextDatum(TL_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   M5.Display.setTextSize(2);
@@ -924,9 +674,17 @@ void Display::showTimezoneSetting(int selection) {
     "AEST (UTC+10)"  // 18
   };
   
-  int startIdx = max(0, selection - 3);
-  int endIdx = min(19, startIdx + 6);
+  // Calculate visible range - show 6 items, with selected item in the middle when possible
+  int visibleCount = 6;
+  int startIdx = max(0, selection - 2);  // Show 2 items before selection
+  int endIdx = min(19, startIdx + visibleCount);
   
+  // Adjust start if we're near the end
+  if (endIdx - startIdx < visibleCount) {
+    startIdx = max(0, endIdx - visibleCount);
+  }
+  
+  // Start list below title (title at y=5, text size 2 is ~16px tall, so start at y=25)
   int y = 25;
   for (int i = startIdx; i < endIdx; i++) {
     if (i == selection) {
@@ -969,5 +727,121 @@ void Display::showDSTSetting(bool enabled) {
   }
   
   // No bottom navigation hints
+}
+
+// Touchscreen interaction methods
+char Display::getKeyboardKeyAt(int x, int y) {
+  // On-screen keyboard layout (same as in showWiFiPassword)
+  const char* keyboardRowsUpper[] = {
+    "QWERTYUIOP",
+    "ASDFGHJKL",
+    "ZXCVBNM",
+    "  \b\n"
+  };
+  const char* keyboardRowsLower[] = {
+    "qwertyuiop",
+    "asdfghjkl",
+    "zxcvbnm",
+    "  \b\n"
+  };
+  const char** keyboardRows = keyboardShift ? keyboardRowsLower : keyboardRowsUpper;
+  
+  int keyWidth = 28;
+  int keyHeight = 30;
+  int keySpacing = 2;
+  int startY = 85;  // Match the keyboard position in showWiFiPassword
+  int startX = 10;
+  
+  // Check if touch is in keyboard area
+  if (y < startY || y > startY + 4 * (keyHeight + keySpacing)) {
+    return 0;
+  }
+  
+  int row = (y - startY) / (keyHeight + keySpacing);
+  if (row < 0 || row >= 4) return 0;
+  
+  if (row == 3) {
+    // Special keys row
+    int rowStartX = startX;
+    // Shift button
+    if (x >= rowStartX && x < rowStartX + keyWidth * 2) {
+      // Toggle shift state
+      keyboardShift = !keyboardShift;
+      // Redraw the keyboard by calling showWiFiPassword again
+      // We'll need to get the current password from the view, but for now return a special code
+      return 1; // Special code for shift toggle
+    }
+    // Space
+    if (x >= rowStartX + keyWidth * 2 + keySpacing && x < rowStartX + keyWidth * 5 + keySpacing) {
+      return ' ';
+    }
+    // Backspace
+    if (x >= rowStartX + keyWidth * 5 + keySpacing * 2 && x < rowStartX + keyWidth * 7 + keySpacing * 2) {
+      return '\b';
+    }
+    // Enter
+    if (x >= rowStartX + keyWidth * 7 + keySpacing * 3 && x < rowStartX + keyWidth * 9 + keySpacing * 3) {
+      return '\n';
+    }
+    return 0;
+  }
+  
+  int rowLen = strlen(keyboardRows[row]);
+  int rowStartX = startX;
+  if (row == 1) rowStartX += keyWidth / 2;
+  if (row == 2) rowStartX += keyWidth;
+  
+  int col = (x - rowStartX) / (keyWidth + keySpacing);
+  if (col >= 0 && col < rowLen) {
+    // Check if touch is actually within the key bounds
+    int keyX = rowStartX + col * (keyWidth + keySpacing);
+    if (x >= keyX && x < keyX + keyWidth) {
+      return keyboardRows[row][col];
+    }
+  }
+  
+  return 0;
+}
+
+int Display::getTouchedItem(int x, int y, ViewItem view) {
+  if (view == VIEW_MAIN_MENU) {
+    // Main menu items: each item is ~26 pixels tall, starting at y=16
+    int itemHeight = 26;
+    int startY = 16;
+    int itemIndex = (y - startY) / itemHeight;
+    if (itemIndex >= 0 && itemIndex < 5 && y >= startY && x >= 10 && x < screenWidth - 10) {
+      return itemIndex;
+    }
+  } else if (view == VIEW_WIFI_SELECT) {
+    // WiFi list items: each item is ~22 pixels tall, starting at y=25
+    int itemHeight = 22;
+    int startY = 25;
+    int itemIndex = (y - startY) / itemHeight;
+    if (itemIndex >= 0 && itemIndex < 20 && y >= startY && x >= 10 && x < screenWidth - 10) {
+      return itemIndex;
+    }
+  } else if (view == VIEW_TIMEZONE_SET) {
+    // Timezone list items: each item is ~22 pixels tall, starting at y=25 (below title)
+    int itemHeight = 22;
+    int startY = 25;
+    int itemIndex = (y - startY) / itemHeight;
+    if (itemIndex >= 0 && itemIndex < 6 && y >= startY && x >= 10 && x < screenWidth - 10) {
+      // Map visible index to actual timezone index
+      // We need to get the current selection to calculate the visible range
+      // For now, return -1 and let button navigation handle it
+      // Touch selection will need to be handled differently
+      return -1; // Disable touch selection for now, use buttons
+    }
+  }
+  return -1;
+}
+
+bool Display::isBackButtonTouched(int x, int y) {
+  // Back button is typically in top-left corner: 5,5 with size 50x25
+  return (x >= 5 && x <= 55 && y >= 5 && y <= 30);
+}
+
+void Display::resetKeyboardShift() {
+  keyboardShift = false;
 }
 

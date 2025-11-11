@@ -1,10 +1,10 @@
 build:
 	@echo "Compiling..."
-	@arduino-cli compile --clean --fqbn m5stack:esp32:m5stack_cardputer .
+	@arduino-cli compile --clean --fqbn m5stack:esp32:m5stack_core2 .
 
 upload:
 	@echo "Uploading..."
-	@arduino-cli upload -p /dev/cu.usbmodem2101 --verbose --fqbn m5stack:esp32:m5stack_cardputer .
+	@arduino-cli upload -p /dev/cu.usbmodem2101 --verbose --fqbn m5stack:esp32:m5stack_core2 .
 
 check_ports:
 	ls -lAhog /dev/tty.*

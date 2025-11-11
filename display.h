@@ -34,6 +34,12 @@ public:
   void decreaseBrightnessStep(int step = 10);
   int getBrightness() const { return brightness; }
   
+  // Touchscreen interaction methods
+  char getKeyboardKeyAt(int x, int y);
+  int getTouchedItem(int x, int y, ViewItem view);
+  bool isBackButtonTouched(int x, int y);
+  void resetKeyboardShift(); // Reset keyboard to uppercase
+  
 private:
   int screenWidth;
   int screenHeight;
@@ -72,6 +78,8 @@ private:
   // Cache for status line redraw decision
   bool lastHadWifiOverride = false;
   String lastWifiLabel = "";
+  // Keyboard shift state (uppercase/lowercase)
+  bool keyboardShift = false;
 };
 
 #endif // DISPLAY_H
