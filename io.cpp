@@ -49,7 +49,8 @@ void IO::update() {
     lastKey = 0;
     lastTouchX = -1;
     lastTouchY = -1;
-    handlePowerManagement();
+    // Don't call handlePowerManagement here - it's handled in main loop
+    // This prevents brightness from being reset before brightness adjustment
     return; // Exit immediately - don't process anything else
   }
   
@@ -63,7 +64,8 @@ void IO::update() {
     lastKey = 0;
     lastTouchX = -1;
     lastTouchY = -1;
-    handlePowerManagement();
+    // Don't call handlePowerManagement here - it's handled in main loop
+    // This prevents brightness from being reset before brightness adjustment
     return; // Exit immediately - don't process anything else
   }
   

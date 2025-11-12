@@ -186,6 +186,9 @@ void View::back() {
     case VIEW_DST_SET:
       currentState = VIEW_MAIN_MENU;
       break;
+    case VIEW_BRIGHTNESS_SET:
+      currentState = VIEW_MAIN_MENU;
+      break;
     default:
       break;
   }

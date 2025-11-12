@@ -13,7 +13,8 @@ enum ViewItem {
   VIEW_TIME_SET,
   VIEW_ALARM_SET,
   VIEW_TIMEZONE_SET,
-  VIEW_DST_SET
+  VIEW_DST_SET,
+  VIEW_BRIGHTNESS_SET
 };
 
 enum MenuItem {
@@ -21,7 +22,8 @@ enum MenuItem {
   MENU_ITEM_WIFI,
   MENU_ITEM_TIME,
   MENU_ITEM_TIMEZONE,
-  MENU_ITEM_DST
+  MENU_ITEM_DST,
+  MENU_ITEM_BRIGHTNESS
 };
 
 class View {
@@ -85,7 +87,7 @@ private:
   
   // Main menu
   MenuItem mainViewSelection;
-  static const int MAIN_VIEW_COUNT = 5;
+  static const int MAIN_VIEW_COUNT = 6;
   
   // WiFi menu
   int wifiCount;

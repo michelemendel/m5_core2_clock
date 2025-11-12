@@ -36,6 +36,8 @@ String wifiPassword = "";
 bool wifiScanning = false;
 bool wifiConnecting = false;
 static const unsigned long SLEEP_DELAY_MS = 30000; // Sleep after 30 seconds of no input
+unsigned long lastButtonPressTime = 0; // Track when a button was last pressed
+static const unsigned long BUTTON_TOUCH_COOLDOWN_MS = 300; // Ignore touch events for 300ms after button press
 
 // Saved WiFi credentials (loaded from Preferences)
 String savedWifiSSID = "";
@@ -198,8 +200,9 @@ void handlePowerManagement() {
 InputEvent processInputEvents() {
   InputEvent event = io.getInputEvent();
   
-  // If alarm is ringing, any key/button stops it
-  if (appClock.isAlarmRinging() && event != INPUT_NONE) {
+  // If alarm is ringing, only button C (SELECT) stops it
+  // A/B buttons will still adjust brightness even when alarm is ringing
+  if (appClock.isAlarmRinging() && event == INPUT_BUTTON_SELECT) {
     appClock.stopAlarm();
     M5.Speaker.stop();  // Stop alarm sound
     io.clearInput();
@@ -214,16 +217,33 @@ InputEvent processInputEvents() {
   // Handle different input events
   if (event == INPUT_BUTTON_UP) {
     handleButtonUp();
+    lastButtonPressTime = millis(); // Record button press time
     io.clearInput();
+    return event; // Return early to prevent touch processing
   } else if (event == INPUT_BUTTON_DOWN) {
     handleButtonDown();
+    lastButtonPressTime = millis(); // Record button press time
     io.clearInput();
+    return event; // Return early to prevent touch processing
   } else if (event == INPUT_BUTTON_SELECT) {
-    handleViewSelect();
+    // In clock view, button C only stops alarm if ringing
+    // Menu is opened via touch screen only
+    ViewItem state = view.getState();
+    if (state == VIEW_CLOCK) {
+      // Do nothing - menu is opened via touch screen only
+      // Alarm stopping is already handled at the top of this function
+    } else {
+      // In other views, handle select normally
+      handleViewSelect();
+    }
+    lastButtonPressTime = millis(); // Record button press time
     io.clearInput();
+    return event; // Return early to prevent touch processing
   } else if (event == INPUT_BUTTON_BACK) {
     handleBack();
+    lastButtonPressTime = millis(); // Record button press time
     io.clearInput();
+    return event; // Return early to prevent touch processing
   } else if (event == INPUT_KEY_PRESSED) {
     handleKeyPressed();
   }
@@ -231,10 +251,14 @@ InputEvent processInputEvents() {
   // Check for touchscreen input (only if no button event occurred)
   // Also double-check that no buttons are currently pressed to prevent conflicts
   // CRITICAL: Only process touch if we have NO button event AND no buttons are pressed
+  // AND enough time has passed since the last button press
   if (event == INPUT_NONE) {
     // Triple-check: don't process touch if any button is currently pressed
     bool anyButtonPressed = M5.BtnA.isPressed() || M5.BtnB.isPressed() || M5.BtnC.isPressed();
-    if (!anyButtonPressed) {
+    unsigned long timeSinceButtonPress = millis() - lastButtonPressTime;
+    bool buttonCooldownActive = timeSinceButtonPress < BUTTON_TOUCH_COOLDOWN_MS;
+
+    if (!anyButtonPressed && !buttonCooldownActive) {
       int touchX = io.getTouchX();
       int touchY = io.getTouchY();
       // Only process touch if coordinates are valid AND we still have no button event
@@ -244,7 +268,7 @@ InputEvent processInputEvents() {
         io.clearInput();
       }
     } else {
-      // If any button is pressed, clear touch coordinates to be safe
+      // If any button is pressed or cooldown is active, clear touch coordinates to be safe
       io.clearInput();
     }
   }
@@ -256,17 +280,43 @@ void handleButtonUp() {
   ViewItem state = view.getState();
   if (state == VIEW_WIFI_PASSWORD) {
     // In password entry, ignore Up (do not go back)
+    return;
   } else if (state == VIEW_CLOCK) {
-    // In clock view, Up increases brightness
-    display.increaseBrightnessStep(10);
+    // In clock view, buttons do nothing - menu is opened via touch screen only
+    return;
+  } else if (state == VIEW_BRIGHTNESS_SET) {
+    // In brightness setting, Up increases brightness
+    display.increaseBrightnessStep(20);
+    display.showBrightnessSetting(display.getBrightness());
+    return;
   } else {
     view.navigateUp();
     // Force redraw for views that need it - get state after navigation
     state = view.getState();
-    if (state == VIEW_TIMEZONE_SET) {
+    if (state == VIEW_MAIN_MENU) {
+      display.showMainView(view.getMainViewSelection());
+    } else if (state == VIEW_TIMEZONE_SET) {
       display.showTimezoneSetting(view.getTimezoneSelection());
     } else if (state == VIEW_WIFI_SCAN || state == VIEW_WIFI_SELECT) {
       display.showWiFiScan(wifiSSIDs, wifiSSIDCount, view.getWiFiSelection());
+    } else if (state == VIEW_TIME_SET) {
+      display.showTimeSetting(
+        view.getTimeHours(),
+        view.getTimeMinutes(),
+        view.getTimeSettingField()
+      );
+    } else if (state == VIEW_ALARM_SET) {
+      display.showAlarmSetting(
+        view.getAlarmHours(),
+        view.getAlarmMinutes(),
+        view.getAlarmEnabled(),
+        view.getAlarmLengthSeconds(),
+        view.getAlarmVolume(),
+        view.getAlarmSettingField(),
+        appClock.getTime()
+      );
+    } else if (state == VIEW_DST_SET) {
+      display.showDSTSetting(view.getTimezoneDST());
     }
   }
 }
@@ -275,17 +325,43 @@ void handleButtonDown() {
   ViewItem state = view.getState();
   if (state == VIEW_WIFI_PASSWORD) {
     // In password entry, ignore Down (do not go back)
+    return;
   } else if (state == VIEW_CLOCK) {
-    // In clock view, Down decreases brightness
-    display.decreaseBrightnessStep(10);
+    // In clock view, buttons do nothing - menu is opened via touch screen only
+    return;
+  } else if (state == VIEW_BRIGHTNESS_SET) {
+    // In brightness setting, Down decreases brightness
+    display.decreaseBrightnessStep(20);
+    display.showBrightnessSetting(display.getBrightness());
+    return;
   } else {
     view.navigateDown();
     // Force redraw for views that need it - get state after navigation
     state = view.getState();
-    if (state == VIEW_TIMEZONE_SET) {
+    if (state == VIEW_MAIN_MENU) {
+      display.showMainView(view.getMainViewSelection());
+    } else if (state == VIEW_TIMEZONE_SET) {
       display.showTimezoneSetting(view.getTimezoneSelection());
     } else if (state == VIEW_WIFI_SCAN || state == VIEW_WIFI_SELECT) {
       display.showWiFiScan(wifiSSIDs, wifiSSIDCount, view.getWiFiSelection());
+    } else if (state == VIEW_TIME_SET) {
+      display.showTimeSetting(
+        view.getTimeHours(),
+        view.getTimeMinutes(),
+        view.getTimeSettingField()
+      );
+    } else if (state == VIEW_ALARM_SET) {
+      display.showAlarmSetting(
+        view.getAlarmHours(),
+        view.getAlarmMinutes(),
+        view.getAlarmEnabled(),
+        view.getAlarmLengthSeconds(),
+        view.getAlarmVolume(),
+        view.getAlarmSettingField(),
+        appClock.getTime()
+      );
+    } else if (state == VIEW_DST_SET) {
+      display.showDSTSetting(view.getTimezoneDST());
     }
   }
 }
@@ -341,6 +417,8 @@ void handleBack() {
     bool wifiConnected = connectivity.isTimeSynced();
     Alarm alarm = appClock.getAlarm();
     display.showClock(time, wifiConnected, alarm, appClock.getTimezone());
+  } else if (view.getState() == VIEW_BRIGHTNESS_SET) {
+    display.showBrightnessSetting(display.getBrightness());
   }
   if (view.getState() == VIEW_WIFI_PASSWORD) {
     wifiPassword = "";
@@ -369,8 +447,9 @@ void handleTouchInput(int x, int y) {
         view.setMainViewSelection(selectedItem);
         handleViewSelect();
       } else if (state == VIEW_WIFI_SELECT) {
-        view.setWiFiSelection(selectedItem);
-        handleViewSelect();
+        // Touch selection disabled for WiFi - use buttons A/B to navigate, button C to select
+        // view.setWiFiSelection(selectedItem);
+        // handleViewSelect();
       } else if (state == VIEW_TIMEZONE_SET) {
         // Touch selection disabled for timezone - use buttons instead
         // view.setTimezoneSelection(selectedItem);
@@ -480,6 +559,9 @@ void updateDisplay(InputEvent event) {
       needsRedraw = true;
       lastPassword = wifiPassword;
     }
+  } else if (currentViewState == VIEW_BRIGHTNESS_SET) {
+    // For brightness view, always redraw on any input (to show brightness changes)
+    needsRedraw = (event != INPUT_NONE);
   } else {
     // For other views, check if any input event occurred
     needsRedraw = (event != INPUT_NONE);
@@ -530,6 +612,9 @@ void handleViewSelect() {
         } else if (selection == MENU_ITEM_DST) {
           view.setState(VIEW_DST_SET);
           view.setTimezoneDST(appClock.getTimezone().daylightSaving);
+        } else if (selection == MENU_ITEM_BRIGHTNESS) {
+          // Set Brightness
+          view.setState(VIEW_BRIGHTNESS_SET);
         }
       }
       break;
@@ -799,6 +884,9 @@ void renderDisplay() {
     case VIEW_DST_SET:
       display.showDSTSetting(view.getTimezoneDST());
       break;
+    
+    case VIEW_BRIGHTNESS_SET:
+      display.showBrightnessSetting(display.getBrightness());
+      break;
   }
 }
-

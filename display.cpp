@@ -306,11 +306,11 @@ void Display::showMainView(int selection) {
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   M5.Display.setTextSize(2);
   
-  const char* items[] = {"Set Alarm", "WiFi Setup", "Set Time", "Set Timezone", "Set DST"};
+  const char* items[] = {"Set Alarm", "WiFi Setup", "Set Time", "Set Timezone", "Set DST", "Set Brightness"};
   
   // Start menu items at top
   int y = 16;
-  for (int i = 0; i < 5; i++) {
+  for (int i = 0; i < 6; i++) {
     if (i == selection) {
       M5.Display.fillRect(10, y - 4, screenWidth - 20, 24, TFT_DARKGREEN);
       M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
@@ -620,11 +620,15 @@ void Display::clearWifiStatusOverride() {
 
 void Display::setBrightness(int level) {
   brightness = constrain(level, 0, 255);
+  // Apply brightness immediately to the display
   M5.Display.setBrightness(brightness);
 }
 
 void Display::setBrightnessForCharger(bool charging) {
-  if (manualBrightness) return; // respect manual override
+  // Always respect manual brightness override - never reset if user has manually adjusted
+  if (manualBrightness) {
+    return; // respect manual override - don't change brightness
+  }
   if (charging) {
     setBrightness(BRIGHTNESS_HIGH);
   } else {
@@ -633,15 +637,43 @@ void Display::setBrightnessForCharger(bool charging) {
 }
 
 void Display::increaseBrightnessStep(int step) {
+  // CRITICAL: Set manualBrightness FIRST before any brightness operations
+  // This prevents handlePowerManagement from resetting brightness
   manualBrightness = true;
-  setBrightness(brightness + step);
-  saveBrightness(); // Persist brightness change
+
+  // Read current brightness from member variable
+  int currentBrightness = brightness;
+  int newBrightness = currentBrightness + step;
+
+  // Ensure brightness doesn't exceed maximum
+  if (newBrightness > 255) {
+    newBrightness = 255;
+  }
+
+  // Apply brightness change
+  setBrightness(newBrightness);
+  // Save brightness and manual flag to persist the change
+  saveBrightness();
 }
 
 void Display::decreaseBrightnessStep(int step) {
+  // CRITICAL: Set manualBrightness FIRST before any brightness operations
+  // This prevents handlePowerManagement from resetting brightness
   manualBrightness = true;
-  setBrightness(brightness - step);
-  saveBrightness(); // Persist brightness change
+
+  // Read current brightness from member variable
+  int currentBrightness = brightness;
+  int newBrightness = currentBrightness - step;
+
+  // Ensure brightness doesn't go below minimum (at least 10 for visibility)
+  if (newBrightness < 10) {
+    newBrightness = 10;
+  }
+
+  // Apply brightness change
+  setBrightness(newBrightness);
+  // Save brightness and manual flag to persist the change
+  saveBrightness();
 }
 
 void Display::saveBrightness() {
@@ -753,6 +785,37 @@ void Display::showDSTSetting(bool enabled) {
   }
   
   // No bottom navigation hints
+}
+
+void Display::showBrightnessSetting(int brightness) {
+  // Leaving clock view; force next clock draw to fully refresh
+  initialClockDrawn = false;
+  M5.Display.fillScreen(TFT_BLACK);
+
+  M5.Display.setTextDatum(MC_DATUM);
+  M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+  M5.Display.setTextSize(2);
+  M5.Display.drawString("Brightness", screenWidth / 2, 20);
+
+  // Show brightness value (0-255)
+  M5.Display.setTextSize(4);
+  char brightnessStr[16];
+  snprintf(brightnessStr, sizeof(brightnessStr), "%d", brightness);
+  M5.Display.drawString(brightnessStr, screenWidth / 2, screenHeight / 2 - 20);
+
+  // Show percentage
+  int percentage = (brightness * 100) / 255;
+  M5.Display.setTextSize(2);
+  char percentStr[16];
+  snprintf(percentStr, sizeof(percentStr), "%d%%", percentage);
+  M5.Display.drawString(percentStr, screenWidth / 2, screenHeight / 2 + 20);
+
+  // Show instructions
+  M5.Display.setTextSize(1);
+  M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
+  M5.Display.drawString("Button A: Increase", screenWidth / 2, screenHeight - 40);
+  M5.Display.drawString("Button B: Decrease", screenWidth / 2, screenHeight - 25);
+  M5.Display.drawString("Button C: Back", screenWidth / 2, screenHeight - 10);
 }
 
 // Touchscreen interaction methods

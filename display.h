@@ -20,6 +20,7 @@ public:
   void showAlarmSetting(uint8_t hours, uint8_t minutes, bool enabled, uint16_t lengthSeconds, uint8_t volume, int field, const Time& currentTime);
   void showTimezoneSetting(int selection);
   void showDSTSetting(bool enabled);
+  void showBrightnessSetting(int brightness);
   void showStatus(const String& message);
   void showConnecting();
   void showSyncing();
