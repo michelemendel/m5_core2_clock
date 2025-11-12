@@ -2,6 +2,7 @@
 #include "view.h"
 #include "calendar.h"
 #include <M5Unified.h>
+#include <Preferences.h>
 #include <time.h>
 #include <math.h>
 #include <string.h>
@@ -17,7 +18,8 @@ void Display::begin() {
   M5.Display.setRotation(1);
   screenWidth = M5.Display.width();
   screenHeight = M5.Display.height();
-  setBrightness(BRIGHTNESS_HIGH);
+  // Load saved brightness, or use default
+  loadBrightness();
   // Initialize battery smoothing buffer
   for (int i = 0; i < 5; ++i) { batterySamples[i] = 0; }
   batterySampleIndex = 0;
@@ -633,11 +635,35 @@ void Display::setBrightnessForCharger(bool charging) {
 void Display::increaseBrightnessStep(int step) {
   manualBrightness = true;
   setBrightness(brightness + step);
+  saveBrightness(); // Persist brightness change
 }
 
 void Display::decreaseBrightnessStep(int step) {
   manualBrightness = true;
   setBrightness(brightness - step);
+  saveBrightness(); // Persist brightness change
+}
+
+void Display::saveBrightness() {
+  Preferences prefs;
+  if (prefs.begin("m5clock", false)) { // false = read-write mode
+    prefs.putUChar("brightness", brightness);
+    prefs.putBool("brightness_manual", manualBrightness);
+    prefs.end();
+  }
+}
+
+void Display::loadBrightness() {
+  Preferences prefs;
+  if (prefs.begin("m5clock", true)) { // true = read-only mode
+    int savedBrightness = prefs.getUChar("brightness", BRIGHTNESS_HIGH);
+    manualBrightness = prefs.getBool("brightness_manual", false);
+    setBrightness(savedBrightness);
+    prefs.end();
+  } else {
+    // If preferences failed, use default
+    setBrightness(BRIGHTNESS_HIGH);
+  }
 }
 
 void Display::showTimezoneSetting(int selection) {

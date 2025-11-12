@@ -33,6 +33,8 @@ public:
   void increaseBrightnessStep(int step = 10);
   void decreaseBrightnessStep(int step = 10);
   int getBrightness() const { return brightness; }
+  void saveBrightness(); // Save brightness to Preferences
+  void loadBrightness(); // Load brightness from Preferences
   
   // Touchscreen interaction methods
   char getKeyboardKeyAt(int x, int y);
