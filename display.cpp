@@ -304,7 +304,7 @@ void Display::showMainView(int selection) {
   
   M5.Display.setTextDatum(TL_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   
   const char* items[] = {"Set Alarm", "WiFi Setup", "Set Time", "Set Timezone", "Set DST", "Set Brightness"};
   
@@ -329,7 +329,7 @@ void Display::showWiFiScan(const String* ssids, int count, int selection) {
   
   M5.Display.setTextDatum(TL_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   
   M5.Display.drawString("WiFi Networks:", 10, 5);
   
@@ -366,7 +366,7 @@ void Display::showWiFiPassword(const String& ssid, const String& password) {
   M5.Display.fillScreen(TFT_BLACK);
   M5.Display.setTextDatum(TL_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   M5.Display.drawString("Password for:", 10, 10);
   
   // Truncate SSID if too long
@@ -377,7 +377,7 @@ void Display::showWiFiPassword(const String& ssid, const String& password) {
   M5.Display.drawString(displaySSID, 10, 30);
   
   // Show password in clear text
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   M5.Display.setTextDatum(TL_DATUM);
   if (password.length() == 0) {
     M5.Display.drawString("_", 10, 55);
@@ -420,21 +420,24 @@ void Display::showWiFiPassword(const String& ssid, const String& password) {
       // Shift button
       M5.Display.fillRect(rowStartX, startY + row * (keyHeight + keySpacing), keyWidth * 2, keyHeight, keyboardShift ? TFT_DARKGREEN : TFT_DARKGRAY);
       M5.Display.setTextColor(TFT_WHITE, keyboardShift ? TFT_DARKGREEN : TFT_DARKGRAY);
-      M5.Display.setTextSize(1);
+      M5.Display.setFont(&fonts::FreeSans9pt7b);
       M5.Display.drawString("Shift", rowStartX + keyWidth, startY + row * (keyHeight + keySpacing) + keyHeight / 2);
       
       // Space (wider)
       M5.Display.fillRect(rowStartX + keyWidth * 2 + keySpacing, startY + row * (keyHeight + keySpacing), keyWidth * 3, keyHeight, TFT_DARKGRAY);
       M5.Display.setTextColor(TFT_WHITE, TFT_DARKGRAY);
+      M5.Display.setFont(&fonts::FreeSans9pt7b);
       M5.Display.drawString("Space", rowStartX + keyWidth * 3.5, startY + row * (keyHeight + keySpacing) + keyHeight / 2);
       
       // Backspace
       M5.Display.fillRect(rowStartX + keyWidth * 5 + keySpacing * 2, startY + row * (keyHeight + keySpacing), keyWidth * 2, keyHeight, TFT_DARKGRAY);
+      M5.Display.setFont(&fonts::FreeSans9pt7b);
       M5.Display.drawString("Del", rowStartX + keyWidth * 6, startY + row * (keyHeight + keySpacing) + keyHeight / 2);
       
       // Enter
       M5.Display.fillRect(rowStartX + keyWidth * 7 + keySpacing * 3, startY + row * (keyHeight + keySpacing), keyWidth * 2, keyHeight, TFT_DARKGREEN);
       M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
+      M5.Display.setFont(&fonts::FreeSans9pt7b);
       M5.Display.drawString("Enter", rowStartX + keyWidth * 8, startY + row * (keyHeight + keySpacing) + keyHeight / 2);
       break;
     }
@@ -464,7 +467,7 @@ void Display::showTimeSetting(uint8_t hours, uint8_t minutes, int field) {
   
   M5.Display.setTextDatum(MC_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(5);
+  M5.Display.setFont(&fonts::Font7);  // Seven-segment style font
   
   // Highlight selected field
   if (field == 0) {
@@ -492,7 +495,7 @@ void Display::showTimeSetting(uint8_t hours, uint8_t minutes, int field) {
   
   // Draw NTP sync option below time
   M5.Display.setTextDatum(MC_DATUM);
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   int optionY = screenHeight / 2 + 25;
   if (field == 2) {
     M5.Display.fillRect(20, optionY - 12, screenWidth - 40, 24, TFT_DARKGREEN);
@@ -516,39 +519,41 @@ void Display::showAlarmSetting(uint8_t hours, uint8_t minutes, bool enabled, uin
   char nowStr[9];
   snprintf(nowStr, sizeof(nowStr), "%02d:%02d:%02d", currentTime.hours, currentTime.minutes, currentTime.seconds);
   M5.Display.setTextDatum(MC_DATUM);
-  M5.Display.setTextSize(1);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);  // Smaller font for current time
   M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
-  M5.Display.drawString(nowStr, screenWidth / 2, 12);
+  M5.Display.drawString(nowStr, screenWidth / 2, 25);
   
   // Draw alarm time
-  M5.Display.setTextSize(3);
+  M5.Display.setTextDatum(MC_DATUM);
+  M5.Display.setFont(&fonts::Font7);  // Seven-segment style font
   
   // Draw time
   int y = screenHeight / 2 - 25;
   if (field == 0) {
     // Highlight hours
-    M5.Display.fillRect(screenWidth / 2 - 48, y - 18, 36, 36, TFT_DARKGREEN);
+    M5.Display.fillRect(screenWidth / 2 - 60, y - 18, 50, 36, TFT_DARKGREEN);
     M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
   } else {
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   }
-  M5.Display.drawString(String(timeStr).substring(0, 2), screenWidth / 2 - 28, y);
+  M5.Display.drawString(String(timeStr).substring(0, 2), screenWidth / 2 - 35, y);
   
-  M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.drawString(":", screenWidth / 2, y);
+  // Draw colon as two dots (Font7 may not have colon character)
+  M5.Display.fillCircle(screenWidth / 2 - 2, y - 8, 3, TFT_WHITE);
+  M5.Display.fillCircle(screenWidth / 2 - 2, y + 8, 3, TFT_WHITE);
   
   if (field == 1) {
     // Highlight minutes
-    M5.Display.fillRect(screenWidth / 2 + 12, y - 18, 36, 36, TFT_DARKGREEN);
+    M5.Display.fillRect(screenWidth / 2 + 10, y - 18, 50, 36, TFT_DARKGREEN);
     M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
   } else {
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   }
-  M5.Display.drawString(String(timeStr).substring(3, 5), screenWidth / 2 + 28, y);
+  M5.Display.drawString(String(timeStr).substring(3, 5), screenWidth / 2 + 35, y);
   
   // Draw enabled/disabled
-  y += 32;
-  M5.Display.setTextSize(2);
+  y += 50;
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   if (field == 2) {
     M5.Display.fillRect(screenWidth / 2 - 60, y - 15, 120, 30, TFT_DARKGREEN);
     M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
@@ -558,7 +563,7 @@ void Display::showAlarmSetting(uint8_t hours, uint8_t minutes, bool enabled, uin
   M5.Display.drawString(enabled ? "ON" : "OFF", screenWidth / 2, y);
 
   // Draw auto-off length (seconds)
-  y += 24;
+  y += 30;
   char lenBuf[24];
   snprintf(lenBuf, sizeof(lenBuf), "Auto-off: %us", (unsigned)lengthSeconds);
   if (field == 3) {
@@ -571,7 +576,7 @@ void Display::showAlarmSetting(uint8_t hours, uint8_t minutes, bool enabled, uin
   M5.Display.drawString(lenBuf, screenWidth / 2, y);
 
   // Draw volume (0-255)
-  y += 20;
+  y += 26;
   char volBuf[24];
   snprintf(volBuf, sizeof(volBuf), "Volume: %u", (unsigned)volume);
   if (field == 4) {
@@ -592,7 +597,7 @@ void Display::showStatus(const String& message) {
   M5.Display.fillScreen(TFT_BLACK);
   M5.Display.setTextDatum(MC_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   M5.Display.drawString(message, screenWidth / 2, screenHeight / 2);
 }
 
@@ -705,7 +710,7 @@ void Display::showTimezoneSetting(int selection) {
   
   M5.Display.setTextDatum(TL_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   
   M5.Display.drawString("Select Timezone:", 10, 5);
   
@@ -765,11 +770,11 @@ void Display::showDSTSetting(bool enabled) {
   M5.Display.fillScreen(TFT_BLACK);
   M5.Display.setTextDatum(MC_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(3);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   M5.Display.drawString("DST", screenWidth / 2, screenHeight / 2 - 30);
   
   // ON/OFF with highlight
-  M5.Display.setTextSize(4);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   if (enabled) {
     M5.Display.fillRect(screenWidth / 2 - 80, screenHeight / 2, 70, 40, TFT_DARKGREEN);
     M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
@@ -794,24 +799,24 @@ void Display::showBrightnessSetting(int brightness) {
 
   M5.Display.setTextDatum(MC_DATUM);
   M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   M5.Display.drawString("Brightness", screenWidth / 2, 20);
 
   // Show brightness value (0-255)
-  M5.Display.setTextSize(4);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   char brightnessStr[16];
   snprintf(brightnessStr, sizeof(brightnessStr), "%d", brightness);
   M5.Display.drawString(brightnessStr, screenWidth / 2, screenHeight / 2 - 20);
 
   // Show percentage
   int percentage = (brightness * 100) / 255;
-  M5.Display.setTextSize(2);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   char percentStr[16];
   snprintf(percentStr, sizeof(percentStr), "%d%%", percentage);
   M5.Display.drawString(percentStr, screenWidth / 2, screenHeight / 2 + 20);
 
   // Show instructions
-  M5.Display.setTextSize(1);
+  M5.Display.setFont(&fonts::FreeSans9pt7b);
   M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
   M5.Display.drawString("Button A: Increase", screenWidth / 2, screenHeight - 40);
   M5.Display.drawString("Button B: Decrease", screenWidth / 2, screenHeight - 25);
