@@ -519,38 +519,40 @@ void Display::showAlarmSetting(uint8_t hours, uint8_t minutes, bool enabled, uin
   char nowStr[9];
   snprintf(nowStr, sizeof(nowStr), "%02d:%02d:%02d", currentTime.hours, currentTime.minutes, currentTime.seconds);
   M5.Display.setTextDatum(MC_DATUM);
-  M5.Display.setFont(&fonts::Font7);  // Seven-segment style font
+  M5.Display.setFont(&fonts::FreeSans9pt7b);  // Smaller font for current time
   M5.Display.setTextColor(TFT_CYAN, TFT_BLACK);
-  M5.Display.drawString(nowStr, screenWidth / 2, 12);
+  M5.Display.drawString(nowStr, screenWidth / 2, 25);
   
   // Draw alarm time
+  M5.Display.setTextDatum(MC_DATUM);
   M5.Display.setFont(&fonts::Font7);  // Seven-segment style font
   
   // Draw time
   int y = screenHeight / 2 - 25;
   if (field == 0) {
     // Highlight hours
-    M5.Display.fillRect(screenWidth / 2 - 48, y - 18, 36, 36, TFT_DARKGREEN);
+    M5.Display.fillRect(screenWidth / 2 - 60, y - 18, 50, 36, TFT_DARKGREEN);
     M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
   } else {
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   }
-  M5.Display.drawString(String(timeStr).substring(0, 2), screenWidth / 2 - 28, y);
+  M5.Display.drawString(String(timeStr).substring(0, 2), screenWidth / 2 - 35, y);
   
-  M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
-  M5.Display.drawString(":", screenWidth / 2, y);
+  // Draw colon as two dots (Font7 may not have colon character)
+  M5.Display.fillCircle(screenWidth / 2 - 2, y - 8, 3, TFT_WHITE);
+  M5.Display.fillCircle(screenWidth / 2 - 2, y + 8, 3, TFT_WHITE);
   
   if (field == 1) {
     // Highlight minutes
-    M5.Display.fillRect(screenWidth / 2 + 12, y - 18, 36, 36, TFT_DARKGREEN);
+    M5.Display.fillRect(screenWidth / 2 + 10, y - 18, 50, 36, TFT_DARKGREEN);
     M5.Display.setTextColor(TFT_WHITE, TFT_DARKGREEN);
   } else {
     M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
   }
-  M5.Display.drawString(String(timeStr).substring(3, 5), screenWidth / 2 + 28, y);
+  M5.Display.drawString(String(timeStr).substring(3, 5), screenWidth / 2 + 35, y);
   
   // Draw enabled/disabled
-  y += 32;
+  y += 50;
   M5.Display.setFont(&fonts::FreeSans9pt7b);
   if (field == 2) {
     M5.Display.fillRect(screenWidth / 2 - 60, y - 15, 120, 30, TFT_DARKGREEN);
@@ -561,7 +563,7 @@ void Display::showAlarmSetting(uint8_t hours, uint8_t minutes, bool enabled, uin
   M5.Display.drawString(enabled ? "ON" : "OFF", screenWidth / 2, y);
 
   // Draw auto-off length (seconds)
-  y += 24;
+  y += 30;
   char lenBuf[24];
   snprintf(lenBuf, sizeof(lenBuf), "Auto-off: %us", (unsigned)lengthSeconds);
   if (field == 3) {
@@ -574,7 +576,7 @@ void Display::showAlarmSetting(uint8_t hours, uint8_t minutes, bool enabled, uin
   M5.Display.drawString(lenBuf, screenWidth / 2, y);
 
   // Draw volume (0-255)
-  y += 20;
+  y += 26;
   char volBuf[24];
   snprintf(volBuf, sizeof(volBuf), "Volume: %u", (unsigned)volume);
   if (field == 4) {
